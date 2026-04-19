@@ -14,15 +14,20 @@ interface ArtifactCardProps {
     isFocused: boolean;
     onClick: () => void;
     onRetry: () => void;
+    animProgress?: number;
+    animPaused?: boolean;
 }
 
 const ArtifactCard = React.memo(({ 
     artifact, 
     isFocused, 
     onClick,
-    onRetry
+    onRetry,
+    animProgress = 1,
+    animPaused = false
 }: ArtifactCardProps) => {
     const codeRef = useRef<HTMLPreElement>(null);
+    const iframeRef = useRef<HTMLIFrameElement>(null);
 
     const {
         attributes,
@@ -44,6 +49,17 @@ const ArtifactCard = React.memo(({
             codeRef.current.scrollTop = codeRef.current.scrollHeight;
         }
     }, [artifact.html]);
+
+    // Animation control logic
+    useEffect(() => {
+        if (iframeRef.current && iframeRef.current.contentWindow && artifact.status === 'complete') {
+            iframeRef.current.contentWindow.postMessage({
+                type: 'UPDATE_ANIMATIONS',
+                progress: animProgress,
+                paused: animPaused
+            }, '*');
+        }
+    }, [animProgress, animPaused, artifact.status]);
 
     const isBlurring = artifact.status === 'streaming';
 
@@ -86,6 +102,7 @@ const ArtifactCard = React.memo(({
                 )}
 
                 <iframe 
+                    ref={iframeRef}
                     srcDoc={artifact.html} 
                     title={artifact.id} 
                     sandbox="allow-scripts allow-forms allow-modals allow-popups allow-presentation allow-same-origin"

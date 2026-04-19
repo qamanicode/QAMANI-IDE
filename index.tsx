@@ -59,6 +59,9 @@ function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [generationMode, setGenerationMode] = useState<'ui' | 'image'>('ui');
 
+  const [animProgress, setAnimProgress] = useState<number>(1);
+  const [animPaused, setAnimPaused] = useState<boolean>(false);
+
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
@@ -419,6 +422,24 @@ You are QAMANI IDE. Create a stunning, high-fidelity UI component for: "${trimme
 1. **Materiality**: Use the specified metaphor to drive every CSS choice. (e.g. if Risograph, use \`feTurbulence\` for grain and \`mix-blend-mode: multiply\` for ink layering).
 2. **Typography**: Use high-quality web fonts. Pair a bold sans-serif with a refined monospace for data.
 3. **Motion**: Include subtle, high-performance CSS/JS animations (hover transitions, entry reveals).
+
+**COMPULSORY ANIMATION CONTROL SCRIPT (MUST INJECT AT THE END OF BODY):**
+\`\`\`html
+<script>
+window.addEventListener('message', (e) => {
+    if (e.data.type === 'UPDATE_ANIMATIONS') {
+        const { progress, paused } = e.data;
+        document.getAnimations().forEach(anim => {
+            anim.pause();
+            const duration = anim.effect.getTiming().duration;
+            if (typeof duration === 'number') anim.currentTime = duration * progress;
+            if (!paused && progress >= 0.99) anim.play();
+        });
+    }
+});
+</script>
+\`\`\`
+
 4. **IP SAFEGUARD**: No artist names or trademarks. 
 5. **Layout**: Be bold with negative space and hierarchy. Avoid generic cards.
 
@@ -619,6 +640,24 @@ You are QAMANI IDE. Create a stunning, high-fidelity UI component for: "${sessio
 1. **Materiality**: Use the specified metaphor to drive CSS choice. 
 2. **Typography**: High-quality web fonts. 
 3. **Motion**: Subtle CSS/JS animations.
+
+**COMPULSORY ANIMATION CONTROL SCRIPT (MUST INJECT AT THE END OF BODY):**
+\`\`\`html
+<script>
+window.addEventListener('message', (e) => {
+    if (e.data.type === 'UPDATE_ANIMATIONS') {
+        const { progress, paused } = e.data;
+        document.getAnimations().forEach(anim => {
+            anim.pause();
+            const duration = anim.effect.getTiming().duration;
+            if (typeof duration === 'number') anim.currentTime = duration * progress;
+            if (!paused && progress >= 0.99) anim.play();
+        });
+    }
+});
+</script>
+\`\`\`
+
 4. **IP SAFEGUARD**: No artist names or trademarks. 
 5. **Layout**: Bold negative space and hierarchy.
 
@@ -830,6 +869,8 @@ Return ONLY RAW HTML. No markdown fences.
                                                     isFocused={isFocused}
                                                     onClick={() => setFocusedArtifactIndex(aIndex)}
                                                     onRetry={() => handleRetryArtifact(session.id, artifact.id)}
+                                                    animProgress={isFocused ? animProgress : 1}
+                                                    animPaused={isFocused ? animPaused : false}
                                                 />
                                             );
                                         })}
@@ -857,6 +898,37 @@ Return ONLY RAW HTML. No markdown fences.
                     {currentSession?.prompt}
                  </div>
                  <div className="action-buttons">
+                    {focusedArtifactIndex !== null && currentSession?.artifacts[focusedArtifactIndex]?.status === 'complete' && !currentSession?.artifacts[focusedArtifactIndex]?.styleName.includes('Visual') && (
+                        <div className="animation-control-bar">
+                            <button 
+                                className={`anim-toggle-btn ${animPaused ? 'paused' : ''}`}
+                                onClick={() => setAnimPaused(!animPaused)}
+                                title={animPaused ? "Resume Animations" : "Pause / Scrub Animations"}
+                            >
+                                {animPaused ? (
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m7 4 12 8-12 8V4z"/></svg>
+                                ) : (
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                                )}
+                            </button>
+                            <div className="scrubber-container">
+                                <input 
+                                    type="range" 
+                                    min="0" 
+                                    max="1" 
+                                    step="0.01" 
+                                    value={animProgress}
+                                    onChange={(e) => {
+                                        setAnimProgress(parseFloat(e.target.value));
+                                        setAnimPaused(true);
+                                    }}
+                                    className="anim-scrubber"
+                                />
+                                <div className="scrubber-track-glow" style={{ width: `${animProgress * 100}%` }} />
+                            </div>
+                            <span className="anim-label">{animPaused ? "Scrubbing" : "Live"}</span>
+                        </div>
+                    )}
                     <button onClick={() => setFocusedArtifactIndex(null)}>
                         <GridIcon /> Grid View
                     </button>

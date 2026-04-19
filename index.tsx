@@ -13,6 +13,22 @@ import { Artifact, Session, ComponentVariation, LayoutOption } from './types';
 import { INITIAL_PLACEHOLDERS } from './constants';
 import { generateId } from './utils';
 
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  rectSortingStrategy
+} from '@dnd-kit/sortable';
+
 import DottedGlowBackground from './components/DottedGlowBackground';
 import ArtifactCard from './components/ArtifactCard';
 import SideDrawer from './components/SideDrawer';
@@ -23,7 +39,8 @@ import {
     ArrowLeftIcon, 
     ArrowRightIcon, 
     ArrowUpIcon, 
-    GridIcon 
+    GridIcon,
+    RetryIcon
 } from './components/Icons';
 
 function App() {
@@ -336,7 +353,7 @@ Return ONLY RAW HTML. No markdown fences.
                             sess.id === sessionId ? {
                                 ...sess,
                                 artifacts: sess.artifacts.map(art => 
-                                    art.id === artifact.id ? { ...art, html: accumulatedHtml } : art
+                                    art.id === artifact.id ? { ...art, html: accumulatedHtml, status: 'streaming' } : art
                                 )
                             } : sess
                         ));
@@ -348,22 +365,36 @@ Return ONLY RAW HTML. No markdown fences.
                 if (finalHtml.startsWith('```')) finalHtml = finalHtml.substring(3).trimStart();
                 if (finalHtml.endsWith('```')) finalHtml = finalHtml.substring(0, finalHtml.length - 3).trimEnd();
 
+                if (!finalHtml) throw new Error("The model returned an empty response.");
+
                 setSessions(prev => prev.map(sess => 
                     sess.id === sessionId ? {
                         ...sess,
                         artifacts: sess.artifacts.map(art => 
-                            art.id === artifact.id ? { ...art, html: finalHtml, status: finalHtml ? 'complete' : 'error' } : art
+                            art.id === artifact.id ? { ...art, html: finalHtml, status: 'complete' } : art
                         )
                     } : sess
                 ));
 
             } catch (e: any) {
                 console.error('Error generating artifact:', e);
+                let displayError = "Something went wrong.";
+                
+                if (e.message?.includes('quota')) displayError = "API quota exceeded. Please try again in 1 minute.";
+                else if (e.message?.includes('safety')) displayError = "Content was blocked by safety filters.";
+                else if (e.message?.includes('API_KEY')) displayError = "API key configuration error.";
+                else if (e.message) displayError = e.message;
+
                 setSessions(prev => prev.map(sess => 
                     sess.id === sessionId ? {
                         ...sess,
                         artifacts: sess.artifacts.map(art => 
-                            art.id === artifact.id ? { ...art, html: `<div style="color: #ff6b6b; padding: 20px;">Error: ${e.message}</div>`, status: 'error' } : art
+                            art.id === artifact.id ? { 
+                                ...art, 
+                                html: '', 
+                                status: 'error',
+                                errorMessage: displayError
+                            } : art
                         )
                     } : sess
                 ));
@@ -379,6 +410,131 @@ Return ONLY RAW HTML. No markdown fences.
         setTimeout(() => inputRef.current?.focus(), 100);
     }
   }, [inputValue, isLoading, sessions.length]);
+
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    setSessions(prev => {
+      const newSessions = [...prev];
+      const sessionIndex = newSessions.findIndex(s => s.artifacts.some(a => a.id === active.id));
+      if (sessionIndex === -1) return prev;
+
+      const artifacts = [...newSessions[sessionIndex].artifacts];
+      const oldIndex = artifacts.findIndex(a => a.id === active.id);
+      const newIndex = artifacts.findIndex(a => a.id === over.id);
+
+      newSessions[sessionIndex] = {
+        ...newSessions[sessionIndex],
+        artifacts: arrayMove(artifacts, oldIndex, newIndex)
+      };
+      return newSessions;
+    });
+  }, []);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const handleRetryArtifact = useCallback(async (sessionId: string, artifactId: string) => {
+    const session = sessions.find(s => s.id === sessionId);
+    if (!session) return;
+    const artifact = session.artifacts.find(a => a.id === artifactId);
+    if (!artifact) return;
+
+    setSessions(prev => prev.map(s => 
+        s.id === sessionId ? {
+            ...s,
+            artifacts: s.artifacts.map(a => 
+                a.id === artifactId ? { ...a, status: 'streaming', html: '', errorMessage: undefined } : a
+            )
+        } : s
+    ));
+
+    try {
+        const apiKey = process.env.API_KEY;
+        if (!apiKey) throw new Error("API_KEY is not configured.");
+        const ai = new GoogleGenAI({ apiKey });
+
+        const prompt = `
+You are QAMANI IDE. Create a stunning, high-fidelity UI component for: "${session.prompt}".
+
+**CONCEPTUAL DIRECTION: ${artifact.styleName}**
+
+**VISUAL EXECUTION RULES:**
+1. **Materiality**: Use the specified metaphor to drive CSS choice. 
+2. **Typography**: High-quality web fonts. 
+3. **Motion**: Subtle CSS/JS animations.
+4. **IP SAFEGUARD**: No artist names or trademarks. 
+5. **Layout**: Bold negative space and hierarchy.
+
+Return ONLY RAW HTML. No markdown fences.
+        `.trim();
+
+        const responseStream = await ai.models.generateContentStream({
+            model: 'gemini-3-flash-preview',
+            contents: [{ parts: [{ text: prompt }], role: "user" }],
+        });
+
+        let accumulatedHtml = '';
+        for await (const chunk of responseStream) {
+            const text = chunk.text;
+            if (typeof text === 'string') {
+                accumulatedHtml += text;
+                setSessions(prev => prev.map(sess => 
+                    sess.id === sessionId ? {
+                        ...sess,
+                        artifacts: sess.artifacts.map(art => 
+                            art.id === artifactId ? { ...art, html: accumulatedHtml, status: 'streaming' } : art
+                        )
+                    } : sess
+                ));
+            }
+        }
+
+        let finalHtml = accumulatedHtml.trim();
+        if (finalHtml.startsWith('```html')) finalHtml = finalHtml.substring(7).trimStart();
+        if (finalHtml.startsWith('```')) finalHtml = finalHtml.substring(3).trimStart();
+        if (finalHtml.endsWith('```')) finalHtml = finalHtml.substring(0, finalHtml.length - 3).trimEnd();
+
+        if (!finalHtml) throw new Error("Model returned empty response.");
+
+        setSessions(prev => prev.map(sess => 
+            sess.id === sessionId ? {
+                ...sess,
+                artifacts: sess.artifacts.map(art => 
+                    art.id === artifactId ? { ...art, html: finalHtml, status: 'complete' } : art
+                )
+            } : sess
+        ));
+
+    } catch (e: any) {
+        let displayError = "Retry failed.";
+        if (e.message?.includes('quota')) displayError = "API quota exceeded.";
+        else if (e.message?.includes('safety')) displayError = "Blocked by safety filters.";
+        else if (e.message) displayError = e.message;
+
+        setSessions(prev => prev.map(sess => 
+            sess.id === sessionId ? {
+                ...sess,
+                artifacts: sess.artifacts.map(art => 
+                    art.id === artifactId ? { 
+                        ...art, 
+                        status: 'error', 
+                        errorMessage: displayError 
+                    } : art
+                )
+            } : sess
+        ));
+    }
+  }, [sessions]);
 
   const handleSurpriseMe = () => {
       const currentPrompt = placeholders[placeholderIndex];
@@ -494,20 +650,32 @@ Return ONLY RAW HTML. No markdown fences.
                     
                     return (
                         <div key={session.id} className={`session-group ${positionClass}`}>
-                            <div className="artifact-grid" ref={sIndex === currentSessionIndex ? gridScrollRef : null}>
-                                {session.artifacts.map((artifact, aIndex) => {
-                                    const isFocused = focusedArtifactIndex === aIndex;
-                                    
-                                    return (
-                                        <ArtifactCard 
-                                            key={artifact.id}
-                                            artifact={artifact}
-                                            isFocused={isFocused}
-                                            onClick={() => setFocusedArtifactIndex(aIndex)}
-                                        />
-                                    );
-                                })}
-                            </div>
+                            <DndContext 
+                              sensors={sensors}
+                              collisionDetection={closestCenter}
+                              onDragEnd={handleDragEnd}
+                            >
+                                <SortableContext 
+                                  items={session.artifacts.map(a => a.id)}
+                                  strategy={rectSortingStrategy}
+                                >
+                                    <div className="artifact-grid" ref={sIndex === currentSessionIndex ? gridScrollRef : null}>
+                                        {session.artifacts.map((artifact, aIndex) => {
+                                            const isFocused = focusedArtifactIndex === aIndex;
+                                            
+                                            return (
+                                                <ArtifactCard 
+                                                    key={artifact.id}
+                                                    artifact={artifact}
+                                                    isFocused={isFocused}
+                                                    onClick={() => setFocusedArtifactIndex(aIndex)}
+                                                    onRetry={() => handleRetryArtifact(session.id, artifact.id)}
+                                                />
+                                            );
+                                        })}
+                                    </div>
+                                </SortableContext>
+                            </DndContext>
                         </div>
                     );
                 })}

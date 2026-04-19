@@ -8,6 +8,7 @@ export interface Artifact {
   styleName: string;
   html: string;
   status: 'streaming' | 'complete' | 'error';
+  errorMessage?: string;
 }
 
 export interface Session {

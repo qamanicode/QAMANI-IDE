@@ -1,6 +1,10 @@
 # QAMANI IDE
 
+Qamani Creative AI generation in a flash.
+
 QAMANI IDE is a creative UI generation tool powered by Gemini 3 Flash. Rapidly generate, explore, and export high-fidelity UI components based on natural language prompts.
+
+Created by [@qamanicode](https://github.com/qamanicode)
 
 ## Features
 

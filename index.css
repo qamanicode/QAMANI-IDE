@@ -15,6 +15,19 @@
     --glass-border: rgba(255, 255, 255, 0.1);
 
     --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    --transition-base: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+[data-theme="light"] {
+    --app-bg: #f8fafc; /* Slate 50 */
+    --stage-bg: #f1f5f9; /* Slate 100 */
+    --text-primary: #0f172a; /* Slate 900 */
+    --text-secondary: #475569; /* Slate 600 */
+    --accent-color: #0f172a;
+    --accent-bg: #e2e8f0; /* Slate 200 */
+    --input-bg: rgba(255, 255, 255, 0.95);
+    --border-color: #e2e8f0;
+    --glass-border: rgba(0, 0, 0, 0.08);
 }
 
 html, body {
@@ -23,6 +36,7 @@ html, body {
     background-color: var(--app-bg);
     color: var(--text-primary);
     overflow: hidden; /* Prevent window scrolling, everything is in the stage */
+    transition: background-color 0.5s ease, color 0.5s ease;
 }
 
 #root {
@@ -49,26 +63,52 @@ html, body {
     position: fixed;
     top: 24px;
     right: 24px;
-    z-index: 101; /* Above input and cards, but below drawer (200) */
+    z-index: 101; 
     color: var(--text-secondary);
     font-size: 0.85rem;
     text-decoration: none;
-    font-weight: 500;
-    opacity: 0.5;
-    transition: all 0.2s ease;
-    padding: 6px 12px;
+    font-weight: 600;
+    opacity: 0.6;
+    transition: var(--transition-base);
+    padding: 10px 18px;
     border-radius: 99px;
-    background: rgba(0, 0, 0, 0.2);
-    border: 1px solid transparent;
-    backdrop-filter: blur(4px);
+    background: var(--accent-bg);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(8px);
 }
 
 .creator-credit:hover {
     opacity: 1;
     color: var(--text-primary);
-    background: rgba(255, 255, 255, 0.05);
-    border-color: rgba(255, 255, 255, 0.1);
-    transform: translateY(1px);
+    background: var(--text-primary);
+    color: var(--app-bg);
+    transform: translateY(-2px);
+}
+
+/* === Theme Toggle === */
+.theme-toggle {
+    position: fixed;
+    top: 24px;
+    left: 24px;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: var(--accent-bg);
+    border: 1px solid var(--glass-border);
+    color: var(--text-primary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 101;
+    transition: var(--transition-base);
+    backdrop-filter: blur(8px);
+}
+
+.theme-toggle:hover {
+    transform: rotate(15deg) scale(1.1);
+    background: var(--text-primary);
+    color: var(--app-bg);
 }
 
 /* === Stage (The Deck) === */
@@ -118,20 +158,63 @@ html, body {
     width: 100%;
 }
 
-.empty-content h1 { 
-    color: var(--text-primary); 
-    font-weight: 800; 
-    letter-spacing: -0.05em; 
-    font-size: 6rem;
-    margin: 0;
-    background: linear-gradient(to bottom right, #fff, #aaa);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+/* === Logo Animation === */
+.logo-container {
+    display: flex;
+    align-items: baseline;
+    gap: 0;
+    margin-bottom: 8px;
     opacity: 0;
     animation: dramaticEntrance 1.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
     animation-delay: 0.2s;
-    text-shadow: 0 10px 30px rgba(255,255,255,0.1);
+}
+
+.big-q {
+    font-size: 8rem;
+    font-weight: 900;
     line-height: 1;
+    background: linear-gradient(135deg, var(--text-primary), var(--text-secondary));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    position: relative;
+    z-index: 2;
+    filter: drop-shadow(0 0 20px rgba(255,255,255,0.1));
+    animation: qCircular 8s linear infinite;
+}
+
+@keyframes qCircular {
+    0% { transform: translate(0, 0); }
+    25% { transform: translate(4px, 4px); }
+    50% { transform: translate(0, 8px); }
+    75% { transform: translate(-4px, 4px); }
+    100% { transform: translate(0, 0); }
+}
+
+.oscillating-letters {
+    display: flex;
+    font-size: 3.5rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: var(--text-primary);
+    margin-left: -0.3rem;
+    padding-bottom: 0.5rem;
+}
+
+.oscillating-letters span {
+    display: inline-block;
+    animation: letterSwing 4s ease-in-out infinite;
+    transform-origin: top center;
+}
+
+.oscillating-letters span:nth-child(1) { animation-delay: 0.1s; }
+.oscillating-letters span:nth-child(2) { animation-delay: 0.2s; }
+.oscillating-letters span:nth-child(3) { animation-delay: 0.3s; }
+.oscillating-letters span:nth-child(4) { animation-delay: 0.4s; }
+.oscillating-letters span:nth-child(5) { animation-delay: 0.5s; }
+
+@keyframes letterSwing {
+    0%, 100% { transform: rotate(-3deg) translateY(0); }
+    50% { transform: rotate(3deg) translateY(-5px); }
 }
 
 .empty-content p {
@@ -143,13 +226,14 @@ html, body {
     color: var(--text-secondary);
     animation: dramaticEntrance 1.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
     animation-delay: 0.5s;
+    font-weight: 500;
 }
 
 .surprise-button {
     margin-top: 10px;
-    background: rgba(255,255,255,0.1);
-    border: 1px solid rgba(255,255,255,0.2);
-    color: #fff;
+    background: var(--accent-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
     padding: 12px 24px;
     border-radius: 99px;
     font-size: 1rem;
@@ -161,10 +245,12 @@ html, body {
     animation-delay: 0.8s;
     transition: all 0.3s ease;
 }
+
 .surprise-button:hover {
-    background: rgba(255,255,255,0.2);
+    background: var(--text-primary);
+    color: var(--app-bg);
     transform: scale(1.05);
-    box-shadow: 0 0 20px rgba(255,255,255,0.2);
+    box-shadow: 0 0 20px var(--glass-border);
 }
 
 @keyframes dramaticEntrance {
@@ -231,7 +317,7 @@ html, body {
 /* === Artifact Card === */
 .artifact-card {
     position: relative;
-    background: #111;
+    background: var(--stage-bg);
     border-radius: 12px;
     border: 1px solid var(--border-color);
     overflow: hidden;
@@ -247,14 +333,14 @@ html, body {
 .artifact-header {
     padding: 12px 16px;
     border-bottom: 1px solid var(--border-color);
-    background: rgba(0,0,0,0.2);
+    background: var(--accent-bg);
     display: flex; justify-content: center;
     font-size: 0.8rem; letter-spacing: 0.05em; text-transform: uppercase;
     color: var(--text-secondary);
     transition: opacity 0.3s;
 }
 .artifact-style-tag {
-    background: rgba(255,255,255,0.05);
+    background: rgba(var(--text-primary-rgb, 255, 255, 255), 0.05);
     padding: 4px 8px; border-radius: 4px;
 }
 
@@ -357,10 +443,50 @@ html, body {
     position: absolute;
     bottom: 30px;
     width: 100%;
-    display: flex; justify-content: center;
+    display: flex; 
+    flex-direction: column;
+    align-items: center; 
+    gap: 12px;
     z-index: 100;
     padding: 0 20px; box-sizing: border-box;
     pointer-events: none;
+}
+
+.mode-selector {
+    display: flex;
+    gap: 8px;
+    background: var(--input-bg);
+    padding: 4px;
+    border-radius: 99px;
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(12px);
+    width: fit-content;
+    pointer-events: auto;
+}
+
+.mode-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    padding: 6px 16px;
+    border-radius: 99px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: var(--transition-base);
+}
+
+.mode-btn.active {
+    background: var(--text-primary);
+    color: var(--app-bg);
+}
+
+.mode-btn:not(.active):hover {
+    background: var(--accent-bg);
+    color: var(--text-primary);
 }
 
 .input-wrapper {

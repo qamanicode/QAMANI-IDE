@@ -7,7 +7,7 @@
 
 import { GoogleGenAI } from '@google/genai';
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import ReactDOM from 'react-dom/client';
+import { createRoot } from 'react-dom/client';
 
 import { Artifact, Session, ComponentVariation, LayoutOption } from './types';
 import { INITIAL_PLACEHOLDERS } from './constants';
@@ -40,7 +40,10 @@ import {
     ArrowRightIcon, 
     ArrowUpIcon, 
     GridIcon,
-    RetryIcon
+    RetryIcon,
+    SunIcon,
+    MoonIcon,
+    ImageIcon
 } from './components/Icons';
 
 function App() {
@@ -52,6 +55,13 @@ function App() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const [placeholders, setPlaceholders] = useState<string[]>(INITIAL_PLACEHOLDERS);
+
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [generationMode, setGenerationMode] = useState<'ui' | 'image'>('ui');
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
   
   const [drawerState, setDrawerState] = useState<{
       isOpen: boolean;
@@ -241,13 +251,14 @@ Required JSON Output Format (stream ONE object per line):
     if (!trimmedInput || isLoading) return;
     if (!manualPrompt) setInputValue('');
 
+    const currentMode = generationMode;
     setIsLoading(true);
     const baseTime = Date.now();
     const sessionId = generateId();
 
     const placeholderArtifacts: Artifact[] = Array(3).fill(null).map((_, i) => ({
         id: `${sessionId}_${i}`,
-        styleName: 'Designing...',
+        styleName: currentMode === 'image' ? 'Visualizing...' : 'Designing...',
         html: '',
         status: 'streaming',
     }));
@@ -267,6 +278,81 @@ Required JSON Output Format (stream ONE object per line):
         const apiKey = process.env.API_KEY;
         if (!apiKey) throw new Error("API_KEY is not configured.");
         const ai = new GoogleGenAI({ apiKey });
+
+        if (currentMode === 'image') {
+            const generateImageArtifact = async (artifact: Artifact, index: number) => {
+                try {
+                    // Slight variation in prompt for diversity if generating 3
+                    const seed = Math.random();
+                    const prompt = `${trimmedInput}${index > 0 ? `, variation ${index}` : ''}`;
+                    
+                    const response = await ai.models.generateContent({
+                        model: 'gemini-2.5-flash-image',
+                        contents: { parts: [{ text: prompt }] },
+                        config: {
+                          imageConfig: {
+                              aspectRatio: "1:1"
+                          }
+                        }
+                    });
+
+                    let base64Image = '';
+                    for (const part of response.candidates[0].content.parts) {
+                        if (part.inlineData) {
+                            base64Image = part.inlineData.data;
+                            break;
+                        }
+                    }
+
+                    if (!base64Image) throw new Error("No image data returned from model.");
+
+                    const imageHtml = `
+<div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; overflow: hidden; margin: 0; padding: 0;">
+    <img src="data:image/png;base64,${base64Image}" style="max-width: 100%; max-height: 100%; object-fit: contain; animation: slideUpFade 1s cubic-bezier(0.16, 1, 0.3, 1) forwards;" />
+    <style>
+        @keyframes slideUpFade {
+            from { opacity: 0; transform: translateY(20px) scale(0.95); filter: blur(10px); }
+            to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+        }
+        body { margin: 0; padding: 0; background: transparent; display: flex; align-items: center; justify-content: center; height: 100vh; }
+    </style>
+</div>`.trim();
+
+                    setSessions(prev => prev.map(sess => 
+                        sess.id === sessionId ? {
+                            ...sess,
+                            artifacts: sess.artifacts.map(art => 
+                                art.id === artifact.id ? { 
+                                    ...art, 
+                                    html: imageHtml, 
+                                    status: 'complete',
+                                    styleName: `Visual Asset ${index + 1}`
+                                } : art
+                            )
+                        } : sess
+                    ));
+
+                } catch (e: any) {
+                    console.error('Error generating image:', e);
+                    setSessions(prev => prev.map(sess => 
+                        sess.id === sessionId ? {
+                            ...sess,
+                            artifacts: sess.artifacts.map(art => 
+                                art.id === artifact.id ? { 
+                                    ...art, 
+                                    html: '', 
+                                    status: 'error',
+                                    errorMessage: e.message || "Failed to generate image"
+                                } : art
+                            )
+                        } : sess
+                    ));
+                }
+            };
+
+            await Promise.all(placeholderArtifacts.map((art, i) => generateImageArtifact(art, i)));
+            return;
+        }
 
         const stylePrompt = `
 Generate 3 distinct, highly evocative design directions for: "${trimmedInput}".
@@ -449,6 +535,67 @@ Return ONLY RAW HTML. No markdown fences.
     const artifact = session.artifacts.find(a => a.id === artifactId);
     if (!artifact) return;
 
+    // Handle retry for image generation
+    if (artifact.styleName.includes('Visual')) {
+        setSessions(prev => prev.map(s => 
+            s.id === sessionId ? {
+                ...s,
+                artifacts: s.artifacts.map(art => 
+                    art.id === artifactId ? { ...art, status: 'streaming', html: '', errorMessage: undefined } : art
+                )
+            } : s
+        ));
+
+        try {
+            const apiKey = process.env.API_KEY;
+            const ai = new GoogleGenAI({ apiKey: apiKey! });
+            const response = await ai.models.generateContent({
+                model: 'gemini-2.5-flash-image',
+                contents: { parts: [{ text: session.prompt }] },
+                config: { imageConfig: { aspectRatio: "1:1" } }
+            });
+
+            let base64Image = '';
+            for (const part of response.candidates[0].content.parts) {
+                if (part.inlineData) {
+                    base64Image = part.inlineData.data;
+                    break;
+                }
+            }
+
+            const imageHtml = `
+<div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; overflow: hidden; margin: 0; padding: 0;">
+    <img src="data:image/png;base64,${base64Image}" style="max-width: 100%; max-height: 100%; object-fit: contain; animation: slideUpFade 1s cubic-bezier(0.16, 1, 0.3, 1) forwards;" />
+    <style>
+        @keyframes slideUpFade {
+            from { opacity: 0; transform: translateY(20px) scale(0.95); filter: blur(10px); }
+            to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+        }
+        body { margin: 0; padding: 0; background: transparent; display: flex; align-items: center; justify-content: center; height: 100vh; }
+    </style>
+</div>`.trim();
+
+            setSessions(prev => prev.map(s => 
+                s.id === sessionId ? {
+                    ...s,
+                    artifacts: s.artifacts.map(art => 
+                        art.id === artifactId ? { ...art, html: imageHtml, status: 'complete' } : art
+                    )
+                } : s
+            ));
+        } catch (e: any) {
+            setSessions(prev => prev.map(s => 
+                s.id === sessionId ? {
+                    ...s,
+                    artifacts: s.artifacts.map(art => 
+                        art.id === artifactId ? { ...art, status: 'error', errorMessage: e.message } : art
+                    )
+                } : s
+            ));
+        }
+        return;
+    }
+
     setSessions(prev => prev.map(s => 
         s.id === sessionId ? {
             ...s,
@@ -588,8 +735,16 @@ Return ONLY RAW HTML. No markdown fences.
 
   return (
     <>
-        <a href="https://x.com/ammaar" target="_blank" rel="noreferrer" className={`creator-credit ${hasStarted ? 'hide-on-mobile' : ''}`}>
-            created by @ammaar
+        <button 
+            className="theme-toggle" 
+            onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
+            title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+        >
+            {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
+        </button>
+
+        <a href="https://github.com/qamanicode" target="_blank" rel="noreferrer" className={`creator-credit ${hasStarted ? 'hide-on-mobile' : ''}`}>
+            created by @qamanicode
         </a>
 
         <SideDrawer 
@@ -626,15 +781,20 @@ Return ONLY RAW HTML. No markdown fences.
             <DottedGlowBackground 
                 gap={24} 
                 radius={1.5} 
-                color="rgba(255, 255, 255, 0.02)" 
-                glowColor="rgba(255, 255, 255, 0.15)" 
+                color={theme === 'dark' ? "rgba(255, 255, 255, 0.02)" : "rgba(0, 0, 0, 0.05)"} 
+                glowColor={theme === 'dark' ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 0, 0, 0.1)"} 
                 speedScale={0.5} 
             />
 
             <div className={`stage-container ${focusedArtifactIndex !== null ? 'mode-focus' : 'mode-split'}`}>
                  <div className={`empty-state ${hasStarted ? 'fade-out' : ''}`}>
                      <div className="empty-content">
-                         <h1>QAMANI IDE</h1>
+                         <div className="logo-container">
+                             <div className="big-q">Q</div>
+                             <div className="oscillating-letters">
+                                 <span>A</span><span>M</span><span>A</span><span>N</span><span>I</span>
+                             </div>
+                         </div>
                          <p>Creative AI generation in a flash</p>
                          <button className="surprise-button" onClick={handleSurpriseMe} disabled={isLoading}>
                              <SparklesIcon /> Surprise Me
@@ -710,6 +870,20 @@ Return ONLY RAW HTML. No markdown fences.
             </div>
 
             <div className="floating-input-container">
+                <div className="mode-selector">
+                    <button 
+                        className={`mode-btn ${generationMode === 'ui' ? 'active' : ''}`} 
+                        onClick={() => setGenerationMode('ui')}
+                    >
+                        <CodeIcon /> App Code
+                    </button>
+                    <button 
+                        className={`mode-btn ${generationMode === 'image' ? 'active' : ''}`} 
+                        onClick={() => setGenerationMode('image')}
+                    >
+                        <ImageIcon /> Visual Asset
+                    </button>
+                </div>
                 <div className={`input-wrapper ${isLoading ? 'loading' : ''}`}>
                     {(!inputValue && !isLoading) && (
                         <div className="animated-placeholder" key={placeholderIndex}>
@@ -744,6 +918,15 @@ Return ONLY RAW HTML. No markdown fences.
 
 const rootElement = document.getElementById('root');
 if (rootElement) {
-  const root = ReactDOM.createRoot(rootElement);
-  root.render(<React.StrictMode><App /></React.StrictMode>);
+  // Use a property on the element to persist the root between loads in this environment
+  const rootContainer = rootElement as any;
+  if (!rootContainer._reactRoot) {
+    rootContainer._reactRoot = createRoot(rootElement);
+  }
+  
+  rootContainer._reactRoot.render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>
+  );
 }
